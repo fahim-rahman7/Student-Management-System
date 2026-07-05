@@ -11,7 +11,7 @@ async function dbConnection() {
     await mongoose.connect(url, {
       serverSelectionTimeoutMS: 5000,
     });
-    console.log("Database connected:", url);
+    console.log("Database connected");
     return;
   } catch (error) {
     const canUseMemoryDb =

@@ -18,8 +18,8 @@ function formatUser(user) {
 }
 
 function getVerificationUrl(token) {
-  const baseUrl = process.env.APP_URL || `http://localhost:${process.env.PORT || 8000}`;
-  return `${baseUrl}${process.env.BASE_URL}/auth/verify-email/${token}`;
+  const frontendUrl = process.env.FRONTEND_URL || process.env.APP_URL || "http://localhost:3000";
+  return `${frontendUrl}/verify-email?token=${token}`;
 }
 
 function getResetPasswordUrl(token) {
@@ -65,19 +65,28 @@ const register = async (req, res) => {
     });
 
     const verificationUrl = getVerificationUrl(token);
-    const emailResult = await sendVerificationEmail({
-      to: user.email,
-      name: user.name,
-      verificationUrl,
-    });
+
+    let emailResult = { sent: false, verificationUrl };
+    try {
+      emailResult = await sendVerificationEmail({
+        to: user.email,
+        name: user.name,
+        verificationUrl,
+      });
+    } catch (emailError) {
+      console.error("Verification email failed:", emailError.message);
+    }
 
     return res.status(201).json({
       success: true,
       message: emailResult.sent
-        ? "Registration successful. Please check your email to verify your account."
-        : "Registration successful. Email could not be sent — use the verification URL below (dev mode).",
+        ? emailResult.previewUrl
+          ? "Registration successful. Open the email preview link below to verify your account."
+          : "Registration successful. Please check your email to verify your account."
+        : "Registration successful. Email could not be sent — use the verification URL below.",
       data: {
         user: formatUser(user),
+        ...(emailResult.previewUrl ? { previewUrl: emailResult.previewUrl } : {}),
         ...(emailResult.sent ? {} : { verificationUrl: emailResult.verificationUrl }),
       },
     });
@@ -238,8 +247,11 @@ const resendVerification = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: emailResult.sent
-        ? "Verification email sent."
-        : "Email could not be sent — use the verification URL below (dev mode).",
+        ? emailResult.previewUrl
+          ? "Verification email sent. Open the preview link below."
+          : "Verification email sent."
+        : "Email could not be sent — use the verification URL below.",
+      ...(emailResult.previewUrl ? { previewUrl: emailResult.previewUrl } : {}),
       ...(emailResult.sent ? {} : { verificationUrl: emailResult.verificationUrl }),
     });
   } catch (error) {
@@ -296,8 +308,11 @@ const forgotPassword = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: emailResult.sent
-        ? "Password reset email sent."
-        : "Email could not be sent — use the reset URL below (dev mode).",
+        ? emailResult.previewUrl
+          ? "Password reset email sent. Open the preview link below."
+          : "Password reset email sent."
+        : "Email could not be sent — use the reset URL below.",
+      ...(emailResult.previewUrl ? { previewUrl: emailResult.previewUrl } : {}),
       ...(emailResult.sent ? {} : { resetUrl: emailResult.resetUrl }),
     });
   } catch (error) {

@@ -45,7 +45,45 @@ async function requireVerifiedEmail(req, res, next) {
   next();
 }
 
+function requireApproved(req, res, next) {
+  if (!req.user.isApproved) {
+    return res.status(403).json({
+      success: false,
+      message: "Your account is pending approval from admin.",
+    });
+  }
+
+  next();
+}
+
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to access this resource.",
+      });
+    }
+
+    next();
+  };
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Admin access required.",
+    });
+  }
+
+  next();
+}
+
 module.exports = {
   protect,
   requireVerifiedEmail,
+  requireApproved,
+  requireRole,
+  requireAdmin,
 };

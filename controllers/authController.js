@@ -12,6 +12,11 @@ function formatUser(user) {
     id: user._id,
     name: user.name,
     email: user.email,
+    profilePicture: user.profilePicture,
+    bio: user.bio,
+    address: user.address,
+    role: user.role,
+    isApproved: user.isApproved,
     isEmailVerified: user.isEmailVerified,
     createdAt: user.createdAt,
   };
@@ -29,7 +34,7 @@ function getResetPasswordUrl(token) {
 
 const register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -42,6 +47,13 @@ const register = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Password must be at least 8 characters.",
+      });
+    }
+
+    if (role && !["admin", "teacher", "student"].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role. Must be admin, teacher, or student.",
       });
     }
 
@@ -60,6 +72,7 @@ const register = async (req, res) => {
       name,
       email,
       password,
+      role: role || "student",
       emailVerificationToken: hashedToken,
       emailVerificationExpires: expires,
     });
@@ -131,6 +144,14 @@ const login = async (req, res) => {
         success: false,
         message: "Please verify your email before logging in.",
         data: { isEmailVerified: false },
+      });
+    }
+
+    if (!user.isApproved) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is pending approval from admin.",
+        data: { isApproved: false },
       });
     }
 
@@ -270,6 +291,47 @@ const getMe = async (req, res) => {
   });
 };
 
+const updateProfile = async (req, res) => {
+  try {
+    const { name, bio, address } = req.body;
+    const userId = req.user._id;
+
+    const updateData = {};
+
+    if (name) updateData.name = name;
+    if (bio !== undefined) updateData.bio = bio;
+    if (address !== undefined) updateData.address = address;
+
+    if (req.file) {
+      updateData.profilePicture = req.file.path;
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(userId, updateData, {
+      new: true,
+      runValidators: true,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully.",
+      data: { user: formatUser(updatedUser) },
+    });
+  } catch (error) {
+    if (error.name === "ValidationError") {
+      const message = Object.values(error.errors)
+        .map((err) => err.message)
+        .join(", ");
+      return res.status(400).json({ success: false, message });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Profile update failed.",
+      error: error.message,
+    });
+  }
+};
+
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -387,6 +449,7 @@ module.exports = {
   verifyEmail,
   resendVerification,
   getMe,
+  updateProfile,
   forgotPassword,
   resetPassword,
 };

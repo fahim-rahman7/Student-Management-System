@@ -8,7 +8,7 @@ router.use(protect, requireAdmin, requireVerifiedEmail);
 
 
 router.post("/create", classController.createClass);
-// router.get("/get", subjectController.getSubject);
-// router.delete("/delete/:id", subjectController.deleteSubject);
+router.get("/get", classController.getClasses);
+router.delete("/delete/:id", classController.deleteClass);
 
 module.exports = router;

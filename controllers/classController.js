@@ -1,6 +1,7 @@
 const Class = require("../models/Class");
 const User = require("../models/User");
 const Subject = require("../models/Subject");
+const { default: mongoose } = require("mongoose");
 
 const createClass = async (req, res) => {
   try {
@@ -115,6 +116,63 @@ const createClass = async (req, res) => {
   }
 };
 
+const getClasses = async (req, res) => {
+    try {
+    const AllClasses = await Class.find();
+    res.status(200).json({
+        success: true,
+        message: "Class get successfully",
+        data: AllClasses,
+      });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message,
+          });
+    }
+}
+
+const deleteClass = async (req, res) => {
+    const {id} = req.params;
+    console.log(id);
+    try {
+        if(!id){
+        return res.status(400).json({
+                success: false,
+                message: "Invalid Request",
+              });
+        }
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+              success: false,
+              message: "Invalid Class ID.",
+            });
+          }
+      
+        const deletedSubject = await Class.findByIdAndDelete(id)
+        console.log(deletedSubject);
+        if(!deletedSubject){
+            return res.status(404).json({
+                success: false,
+                message: "Subject not found",
+              });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Class Deleted successfully.",
+        })
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message,
+          });
+    }
+}
+
 module.exports = {
   createClass,
+  getClasses,
+  deleteClass
 };

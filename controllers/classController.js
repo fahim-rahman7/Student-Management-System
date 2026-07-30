@@ -2,6 +2,8 @@ const Class = require("../models/Class");
 const User = require("../models/User");
 const Subject = require("../models/Subject");
 const { default: mongoose } = require("mongoose");
+const { validateClassTeacher, validateStudents, validateSubjects } = require("../helpers/classValidation");
+const { AppError } = require("../helpers/utils");
 
 const createClass = async (req, res) => {
   try {
@@ -13,87 +15,25 @@ const createClass = async (req, res) => {
       subjects = [],
     } = req.body;
 
- 
-    const creatorId = req.user._id;
-
-   
     if (!name) {
-      return res.status(400).json({
-        success: false,
-        message: "Class name is required",
-      });
+      throw new AppError("Class name is required.", 400);
     }
 
-    // Check existing class
     const existingClass = await Class.findOne({
       name,
       section,
     });
 
     if (existingClass) {
-      return res.status(400).json({
-        success: false,
-        message: "Class already exists",
-      });
+      throw new AppError("Class already exists.", 400);
     }
 
-    // Validate class teacher
-    if (classTeacher) {
-      const teacher = await User.findOne({
-        _id: classTeacher,
-        role: "teacher",
-      });
+    await validateClassTeacher(classTeacher);
+    await validateStudents(students);
+    await validateSubjects(subjects);
 
-      if (!teacher) {
-        return res.status(404).json({
-          success: false,
-          message: "Invalid class teacher",
-        });
-      }
-    }
-
-    // Validate students
-    if (students.length > 0) {
-      const studentCount = await User.countDocuments({
-        _id: { $in: students },
-        role: "student",
-      });
-
-      if (studentCount !== students.length) {
-        return res.status(400).json({
-          success: false,
-          message: "One or more students are invalid",
-        });
-      }
-    }
-
-    // Validate subjects and teachers
-    for (const item of subjects) {
-      const subject = await Subject.findById(item.subject);
-
-      if (!subject) {
-        return res.status(404).json({
-          success: false,
-          message: `Subject not found: ${item.subject}`,
-        });
-      }
-
-      const teacher = await User.findOne({
-        _id: item.teacher,
-        role: "teacher",
-      });
-
-      if (!teacher) {
-        return res.status(404).json({
-          success: false,
-          message: `Invalid teacher for subject ${subject.name}`,
-        });
-      }
-    }
-
-    // Create class
     const newClass = await Class.create({
-      creatorId,
+      creatorId: req.user._id,
       name,
       section,
       classTeacher,
@@ -103,13 +43,12 @@ const createClass = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Class created successfully",
+      message: "Class created successfully.",
       data: newClass,
     });
-  } catch (error) {
-    console.error(error);
 
-    return res.status(500).json({
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message,
     });
@@ -144,7 +83,7 @@ const updateClass = async (req, res) => {
   } = req.body;
 
   try {
-    // Validate Class ID
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -152,7 +91,7 @@ const updateClass = async (req, res) => {
       });
     }
 
-    // Check if class exists
+
     const existingClass = await Class.findById(id);
 
     if (!existingClass) {
@@ -232,7 +171,6 @@ const updateClass = async (req, res) => {
       }
     }
 
-    // Update class
     const updatedClass = await Class.findByIdAndUpdate(
       id,
       {

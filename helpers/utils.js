@@ -9,4 +9,15 @@ const rateLimiter = rateLimit({
     }
 });
 
-module.exports = { rateLimiter };
+class AppError extends Error {
+
+    constructor(message,statusCode){
+
+        super(message);
+
+        this.statusCode = statusCode;
+    }
+
+}
+
+module.exports = { rateLimiter, AppError };

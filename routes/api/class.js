@@ -9,6 +9,7 @@ router.use(protect, requireAdmin, requireVerifiedEmail);
 
 router.post("/create", classController.createClass);
 router.get("/get", classController.getClasses);
+router.patch("/update/:id", classController.updateClass);
 router.delete("/delete/:id", classController.deleteClass);
 
 module.exports = router;

@@ -1,10 +1,17 @@
 const Class = require("../models/Class");
-const User = require("../models/User");
-const Subject = require("../models/Subject");
-const { default: mongoose } = require("mongoose");
-const { validateClassTeacher, validateStudents, validateSubjects } = require("../helpers/classValidation");
+const mongoose = require("mongoose");
+
+const {
+  validateClassTeacher,
+  validateStudents,
+  validateSubjects,
+} = require("../helpers/classValidation");
+
 const { AppError } = require("../helpers/utils");
 
+// ======================
+// Create Class
+// ======================
 const createClass = async (req, res) => {
   try {
     const {
@@ -46,7 +53,6 @@ const createClass = async (req, res) => {
       message: "Class created successfully.",
       data: newClass,
     });
-
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -55,192 +61,142 @@ const createClass = async (req, res) => {
   }
 };
 
+// ======================
+// Get All Classes
+// ======================
 const getClasses = async (req, res) => {
-    try {
-    const AllClasses = await Class.find();
-    res.status(200).json({
-        success: true,
-        message: "Class get successfully",
-        data: AllClasses,
-      });
-
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message,
-          });
-    }
-}
-
-const updateClass = async (req, res) => {
-  const { id } = req.params;
-  const {
-    name,
-    section,
-    classTeacher,
-    students = [],
-    subjects = [],
-  } = req.body;
-
   try {
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Class ID.",
-      });
-    }
-
-
-    const existingClass = await Class.findById(id);
-
-    if (!existingClass) {
-      return res.status(404).json({
-        success: false,
-        message: "Class not found.",
-      });
-    }
-
-    // Check duplicate class
-    if (name) {
-      const duplicateClass = await Class.findOne({
-        name,
-        section,
-        _id: { $ne: id },
-      });
-
-      if (duplicateClass) {
-        return res.status(400).json({
-          success: false,
-          message: "Another class with the same name and section already exists.",
-        });
-      }
-    }
-
-    // Validate class teacher
-    if (classTeacher) {
-      const teacher = await User.findOne({
-        _id: classTeacher,
-        role: "teacher",
-      });
-
-      if (!teacher) {
-        return res.status(404).json({
-          success: false,
-          message: "Invalid class teacher.",
-        });
-      }
-    }
-
-    // Validate students
-    if (students.length > 0) {
-      const studentCount = await User.countDocuments({
-        _id: { $in: students },
-        role: "student",
-      });
-
-      if (studentCount !== students.length) {
-        return res.status(400).json({
-          success: false,
-          message: "One or more students are invalid.",
-        });
-      }
-    }
-
-    // Validate subjects and teachers
-    for (const item of subjects) {
-      const subject = await Subject.findById(item.subject);
-
-      if (!subject) {
-        return res.status(404).json({
-          success: false,
-          message: `Subject not found: ${item.subject}`,
-        });
-      }
-
-      const teacher = await User.findOne({
-        _id: item.teacher,
-        role: "teacher",
-      });
-
-      if (!teacher) {
-        return res.status(404).json({
-          success: false,
-          message: `Invalid teacher for subject ${subject.name}`,
-        });
-      }
-    }
-
-    const updatedClass = await Class.findByIdAndUpdate(
-      id,
-      {
-        name,
-        section,
-        classTeacher,
-        students,
-        subjects,
-      },
-      {
-        returnDocument: "after"
-      }
-    );
+    const classes = await Class.find()
+      .populate("classTeacher", "name email")
+      .populate("students", "name email")
+      .populate("subjects.subject", "name code")
+      .populate("subjects.teacher", "name email");
 
     return res.status(200).json({
       success: true,
-      message: "Class updated successfully.",
-      data: updatedClass,
+      message: "Classes fetched successfully.",
+      data: classes,
     });
-
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
+// ======================
+// Update Class
+// ======================
+const updateClass = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-const deleteClass = async (req, res) => {
-    const {id} = req.params;
-    console.log(id);
-    try {
-        if(!id){
-        return res.status(400).json({
-                success: false,
-                message: "Invalid Request",
-              });
-        }
-        if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({
-              success: false,
-              message: "Invalid Class ID.",
-            });
-          }
-      
-        const deletedSubject = await Class.findByIdAndDelete(id)
-        console.log(deletedSubject);
-        if(!deletedSubject){
-            return res.status(404).json({
-                success: false,
-                message: "Subject not found",
-              });
-        }
-
-        res.status(200).json({
-            success: true,
-            message: "Class Deleted successfully.",
-        })
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message,
-          });
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError("Invalid Class ID.", 400);
     }
-}
+
+    const existingClass = await Class.findById(id);
+
+    if (!existingClass) {
+      throw new AppError("Class not found.", 404);
+    }
+
+    const {
+      name,
+      section,
+      classTeacher,
+      students,
+      subjects,
+    } = req.body;
+
+    // Duplicate Check
+    if (name || section) {
+      const duplicateClass = await Class.findOne({
+        name: name ?? existingClass.name,
+        section: section ?? existingClass.section,
+        _id: { $ne: id },
+      });
+
+      if (duplicateClass) {
+        throw new AppError(
+          "Another class with the same name and section already exists.",
+          400
+        );
+      }
+    }
+
+    // Validate only if values are sent
+    if (classTeacher !== undefined) {
+      await validateClassTeacher(classTeacher);
+      existingClass.classTeacher = classTeacher;
+    }
+
+    if (students !== undefined) {
+      await validateStudents(students);
+      existingClass.students = students;
+    }
+
+    if (subjects !== undefined) {
+      await validateSubjects(subjects);
+      existingClass.subjects = subjects;
+    }
+
+    if (name !== undefined) {
+      existingClass.name = name;
+    }
+
+    if (section !== undefined) {
+      existingClass.section = section;
+    }
+
+    await existingClass.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Class updated successfully.",
+      data: existingClass,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// ======================
+// Delete Class
+// ======================
+const deleteClass = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError("Invalid Class ID.", 400);
+    }
+
+    const deletedClass = await Class.findByIdAndDelete(id);
+
+    if (!deletedClass) {
+      throw new AppError("Class not found.", 404);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Class deleted successfully.",
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 module.exports = {
   createClass,
   getClasses,
   updateClass,
-  deleteClass
+  deleteClass,
 };

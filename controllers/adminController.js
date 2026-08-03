@@ -1,4 +1,6 @@
+const mongoose = require("mongoose");
 const User = require("../models/User");
+const { AppError } = require("../helpers/utils");
 
 function formatUser(user) {
   return {
@@ -31,10 +33,9 @@ const getPendingUsers = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to retrieve pending users.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -43,20 +44,22 @@ const approveUser = async (req, res) => {
   try {
     const { userId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      throw new AppError("Invalid User ID.", 400);
+    }
+
     const user = await User.findById(userId);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found.",
-      });
+      throw new AppError("User not found.", 404);
+    }
+
+    if (user.role === "admin") {
+      throw new AppError("Admin users are already approved.", 400);
     }
 
     if (user.isApproved) {
-      return res.status(400).json({
-        success: false,
-        message: "User is already approved.",
-      });
+      throw new AppError("User is already approved.", 400);
     }
 
     user.isApproved = true;
@@ -65,13 +68,15 @@ const approveUser = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "User approved successfully.",
-      data: { user: formatUser(user) },
+      data: {
+        user: formatUser(user),
+      },
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to approve user.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -80,33 +85,31 @@ const rejectUser = async (req, res) => {
   try {
     const { userId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      throw new AppError("Invalid User ID.", 400);
+    }
+
     const user = await User.findById(userId);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found.",
-      });
+      throw new AppError("User not found.", 404);
     }
 
     if (user.role === "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Cannot reject admin users.",
-      });
+      throw new AppError("Cannot reject admin user.", 403);
     }
 
-    await User.findByIdAndDelete(userId);
+    await user.deleteOne();
 
     return res.status(200).json({
       success: true,
-      message: "User rejected and deleted successfully.",
+      message: "User rejected successfully.",
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to reject user.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -114,15 +117,22 @@ const rejectUser = async (req, res) => {
 const getTeachers = async (req, res) => {
   try {
     const { status } = req.query;
-    const filter = { role: "teacher" };
+
+    const filter = {
+      role: "teacher",
+    };
 
     if (status === "approved") {
       filter.isApproved = true;
-    } else if (status === "pending") {
+    }
+
+    if (status === "pending") {
       filter.isApproved = false;
     }
 
-    const teachers = await User.find(filter).sort({ createdAt: -1 });
+    const teachers = await User.find(filter).sort({
+      createdAt: -1,
+    });
 
     return res.status(200).json({
       success: true,
@@ -132,11 +142,11 @@ const getTeachers = async (req, res) => {
         count: teachers.length,
       },
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to retrieve teachers.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -144,15 +154,22 @@ const getTeachers = async (req, res) => {
 const getStudents = async (req, res) => {
   try {
     const { status } = req.query;
-    const filter = { role: "student" };
+
+    const filter = {
+      role: "student",
+    };
 
     if (status === "approved") {
       filter.isApproved = true;
-    } else if (status === "pending") {
+    }
+
+    if (status === "pending") {
       filter.isApproved = false;
     }
 
-    const students = await User.find(filter).sort({ createdAt: -1 });
+    const students = await User.find(filter).sort({
+      createdAt: -1,
+    });
 
     return res.status(200).json({
       success: true,
@@ -162,11 +179,11 @@ const getStudents = async (req, res) => {
         count: students.length,
       },
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to retrieve students.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -174,19 +191,28 @@ const getStudents = async (req, res) => {
 const getAllUsers = async (req, res) => {
   try {
     const { role, status } = req.query;
+
     const filter = {};
 
-    if (role && ["admin", "teacher", "student"].includes(role)) {
+    if (role) {
+      if (!["admin", "teacher", "student"].includes(role)) {
+        throw new AppError("Invalid role.", 400);
+      }
+
       filter.role = role;
     }
 
     if (status === "approved") {
       filter.isApproved = true;
-    } else if (status === "pending") {
+    }
+
+    if (status === "pending") {
       filter.isApproved = false;
     }
 
-    const users = await User.find(filter).sort({ createdAt: -1 });
+    const users = await User.find(filter).sort({
+      createdAt: -1,
+    });
 
     return res.status(200).json({
       success: true,
@@ -196,11 +222,11 @@ const getAllUsers = async (req, res) => {
         count: users.length,
       },
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to retrieve users.",
-      error: error.message,
+      message: error.message,
     });
   }
 };

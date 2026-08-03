@@ -1,127 +1,170 @@
 const Subject = require("../models/Subject");
+const mongoose = require("mongoose");
+const { AppError } = require("../helpers/utils");
 
+// =====================================
+// Create Subject
+// =====================================
 const createSubject = async (req, res) => {
-    const {name, code, credits, description} = req.body;
-    try {
-        if (!name || !code || !credits) {
-            return res.status(400).json({
-              success: false,
-              message: "Name, code, credits are required.",
-            });
-          }
-        
-        const newSubject = await Subject.create({
-            creatorId: req.user._id,
-            name,
-            code,
-            credits,
-            description
-        })
-
-        res.status(201).json({
-            success: true,
-            message: "Subject created successfully.",
-            data: newSubject
-        })
-
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "Subject Create failed.",
-            error: error.message,
-          });
-    }
-}
-
-const getSubject = async (req, res) => {
-    try {
-        const allSubject = await Subject.find();
-        res.status(200).json({
-            success: true,
-            message: "All Subject Get successfully.",
-            data: allSubject
-        })
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "Subject Create failed.",
-            error: error.message,
-          });
-    }
-}
-
-const updateSubject = async (req, res) => {
-    const { id } = req.params;
+  try {
     const { name, code, credits, description } = req.body;
-  
-    try {
-     
-      const subject = await Subject.findById(id);
-  
-      if (!subject) {
-        return res.status(404).json({
-          success: false,
-          message: "Subject not found.",
-        });
-      }
-  
-    
-      if (code) {
-        const existingSubject = await Subject.findOne({
-          code,
-          _id: { $ne: id },
-        });
-  
-        if (existingSubject) {
-          return res.status(400).json({
-            success: false,
-            message: "Subject code already exists.",
-          });
-        }
-      }
-  
-      const updatedSubject = await Subject.findByIdAndUpdate(
-        id,
-        {
-          name,
-          code,
-          credits,
-          description,
-        },
-        {
-          returnDocument: "after"
-        }
-      );
-  
-      return res.status(200).json({
-        success: true,
-        message: "Subject updated successfully.",
-        data: updatedSubject,
-      });
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: "Subject update failed.",
-        error: error.message,
-      });
-    }
-  };
 
+    if (!name) {
+      throw new AppError("Subject name is required.", 400);
+    }
+
+    if (!code) {
+      throw new AppError("Subject code is required.", 400);
+    }
+
+    if (credits === undefined) {
+      throw new AppError("Subject credits are required.", 400);
+    }
+
+    const existingSubject = await Subject.findOne({ code });
+
+    if (existingSubject) {
+      throw new AppError("Subject code already exists.", 400);
+    }
+
+    const newSubject = await Subject.create({
+      creatorId: req.user._id,
+      name,
+      code,
+      credits,
+      description,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Subject created successfully.",
+      data: newSubject,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// =====================================
+// Get All Subjects
+// =====================================
+const getSubject = async (req, res) => {
+  try {
+    const allSubject = await Subject.find().populate(
+      "creatorId",
+      "name email"
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Subjects fetched successfully.",
+      total: allSubject.length,
+      data: allSubject,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// =====================================
+// Update Subject
+// =====================================
+const updateSubject = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError("Invalid Subject ID.", 400);
+    }
+
+    const subject = await Subject.findById(id);
+
+    if (!subject) {
+      throw new AppError("Subject not found.", 404);
+    }
+
+    const { name, code, credits, description } = req.body;
+
+    if (code) {
+      const existingSubject = await Subject.findOne({
+        code,
+        _id: { $ne: id },
+      });
+
+      if (existingSubject) {
+        throw new AppError("Subject code already exists.", 400);
+      }
+    }
+
+    if (name !== undefined) {
+      subject.name = name;
+    }
+
+    if (code !== undefined) {
+      subject.code = code;
+    }
+
+    if (credits !== undefined) {
+      subject.credits = credits;
+    }
+
+    if (description !== undefined) {
+      subject.description = description;
+    }
+
+    await subject.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Subject updated successfully.",
+      data: subject,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// =====================================
+// Delete Subject
+// =====================================
 const deleteSubject = async (req, res) => {
-    const {id} = req.params;
-    try {
-        await Subject.findByIdAndDelete(id);
-        res.status(200).json({
-            success: true,
-            message: "Subject Deleted successfully.",
-        })
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "Subject Delete failed.",
-            error: error.message,
-          });
-    }
-}
+  try {
+    const { id } = req.params;
 
-module.exports = {createSubject, getSubject, deleteSubject, updateSubject} 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError("Invalid Subject ID.", 400);
+    }
+
+    const subject = await Subject.findByIdAndDelete(id);
+
+    if (!subject) {
+      throw new AppError("Subject not found.", 404);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Subject deleted successfully.",
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+module.exports = {
+  createSubject,
+  getSubject,
+  updateSubject,
+  deleteSubject,
+};

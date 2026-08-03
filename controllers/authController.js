@@ -1,11 +1,14 @@
 const User = require("../models/User");
 const {
   generateEmailVerificationToken,
-  generatePasswordResetToken,
-  hashToken,
   signAccessToken,
 } = require("../helpers/tokenHelper");
-const { sendVerificationEmail, sendPasswordResetEmail } = require("../helpers/emailHelper");
+
+const {
+  sendVerificationEmail,
+} = require("../helpers/emailHelper");
+
+const { AppError } = require("../helpers/utils");
 
 function formatUser(user) {
   return {
@@ -23,50 +26,63 @@ function formatUser(user) {
 }
 
 function getVerificationUrl(token) {
-  const frontendUrl = process.env.FRONTEND_URL || process.env.APP_URL || "http://localhost:3000";
-  return `${frontendUrl}/verify-email?token=${token}`;
-}
+  const frontendUrl =
+    process.env.FRONTEND_URL ||
+    process.env.APP_URL ||
+    "http://localhost:3000";
 
-function getResetPasswordUrl(token) {
-  const frontendUrl = process.env.FRONTEND_URL || process.env.APP_URL || "http://localhost:3000";
-  return `${frontendUrl}/reset-password?token=${token}`;
+  return `${frontendUrl}/verify-email?token=${token}`;
 }
 
 const register = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Name, email, and password are required.",
-      });
+    if (!name) {
+      throw new AppError("Name is required.", 400);
+    }
+
+    if (!email) {
+      throw new AppError("Email is required.", 400);
+    }
+
+    if (!password) {
+      throw new AppError("Password is required.", 400);
     }
 
     if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 8 characters.",
-      });
+      throw new AppError(
+        "Password must be at least 8 characters.",
+        400
+      );
     }
 
-    if (role && !["admin", "teacher", "student"].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role. Must be admin, teacher, or student.",
-      });
+    if (
+      role &&
+      !["admin", "teacher", "student"].includes(role)
+    ) {
+      throw new AppError(
+        "Invalid role. Must be admin, teacher or student.",
+        400
+      );
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    const existingUser = await User.findOne({
+      email: email.toLowerCase(),
+    });
 
     if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "An account with this email already exists.",
-      });
+      throw new AppError(
+        "An account with this email already exists.",
+        409
+      );
     }
 
-    const { token, hashedToken, expires } = generateEmailVerificationToken();
+    const {
+      token,
+      hashedToken,
+      expires,
+    } = generateEmailVerificationToken();
 
     const user = await User.create({
       name,
@@ -79,42 +95,40 @@ const register = async (req, res) => {
 
     const verificationUrl = getVerificationUrl(token);
 
-    let emailResult = { sent: false, verificationUrl };
+    let emailResult = {
+      sent: false,
+      verificationUrl,
+    };
+
     try {
       emailResult = await sendVerificationEmail({
         to: user.email,
         name: user.name,
         verificationUrl,
       });
-    } catch (emailError) {
-      console.error("Verification email failed:", emailError.message);
+    } catch (err) {
+      console.error(err.message);
     }
 
     return res.status(201).json({
       success: true,
       message: emailResult.sent
-        ? emailResult.previewUrl
-          ? "Registration successful. Open the email preview link below to verify your account."
-          : "Registration successful. Please check your email to verify your account."
-        : "Registration successful. Email could not be sent — use the verification URL below.",
+        ? "Registration successful. Please verify your email."
+        : "Registration successful. Email could not be sent.",
       data: {
         user: formatUser(user),
-        ...(emailResult.previewUrl ? { previewUrl: emailResult.previewUrl } : {}),
-        ...(emailResult.sent ? {} : { verificationUrl: emailResult.verificationUrl }),
+        ...(emailResult.previewUrl && {
+          previewUrl: emailResult.previewUrl,
+        }),
+        ...(!emailResult.sent && {
+          verificationUrl,
+        }),
       },
     });
   } catch (error) {
-    if (error.name === "ValidationError") {
-      const message = Object.values(error.errors)
-        .map((err) => err.message)
-        .join(", ");
-      return res.status(400).json({ success: false, message });
-    }
-
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Registration failed.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -123,36 +137,46 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Email and password are required.",
-      });
+    if (!email) {
+      throw new AppError("Email is required.", 400);
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select("+password");
+    if (!password) {
+      throw new AppError("Password is required.", 400);
+    }
 
-    if (!user || !(await user.comparePassword(password))) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+    }).select("+password");
+
+    if (!user) {
+      throw new AppError(
+        "Invalid email or password.",
+        401
+      );
+    }
+
+    const isMatch = await user.comparePassword(password);
+
+    if (!isMatch) {
+      throw new AppError(
+        "Invalid email or password.",
+        401
+      );
     }
 
     if (!user.isEmailVerified) {
-      return res.status(403).json({
-        success: false,
-        message: "Please verify your email before logging in.",
-        data: { isEmailVerified: false },
-      });
+      throw new AppError(
+        "Please verify your email before logging in.",
+        403
+      );
     }
 
     if (!user.isApproved) {
-      return res.status(403).json({
-        success: false,
-        message: "Your account is pending approval from admin.",
-        data: { isApproved: false },
-      });
+      throw new AppError(
+        "Your account is pending approval from admin.",
+        403
+      );
     }
 
     const token = signAccessToken(user._id);
@@ -166,10 +190,9 @@ const login = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Login failed.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -179,46 +202,48 @@ const verifyEmail = async (req, res) => {
     const { token } = req.params;
 
     if (!token) {
-      return res.status(400).json({
-        success: false,
-        message: "Verification token is required.",
-      });
+      throw new AppError("Verification token is required.", 400);
     }
 
     const hashedToken = hashToken(token);
 
     const user = await User.findOne({
       emailVerificationToken: hashedToken,
-      emailVerificationExpires: { $gt: Date.now() },
-    }).select("+emailVerificationToken +emailVerificationExpires");
+      emailVerificationExpires: {
+        $gt: Date.now(),
+      },
+    }).select(
+      "+emailVerificationToken +emailVerificationExpires"
+    );
 
     if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired verification token.",
-      });
+      throw new AppError(
+        "Invalid or expired verification token.",
+        400
+      );
     }
 
     user.isEmailVerified = true;
     user.emailVerificationToken = undefined;
     user.emailVerificationExpires = undefined;
+
     await user.save();
 
     const accessToken = signAccessToken(user._id);
 
     return res.status(200).json({
       success: true,
-      message: "Email verified successfully. You can now log in.",
+      message: "Email verified successfully.",
       data: {
         user: formatUser(user),
         token: accessToken,
       },
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Email verification failed.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -228,106 +253,133 @@ const resendVerification = async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required.",
-      });
+      throw new AppError("Email is required.", 400);
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select(
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+    }).select(
       "+emailVerificationToken +emailVerificationExpires"
     );
 
+    /**
+     * Security Reason
+     * Never tell whether an email exists or not.
+     */
     if (!user) {
       return res.status(200).json({
         success: true,
-        message: "If an account exists with this email, a verification link has been sent.",
+        message:
+          "If an account exists with this email, a verification email has been sent.",
       });
     }
 
     if (user.isEmailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is already verified.",
-      });
+      throw new AppError(
+        "Email is already verified.",
+        400
+      );
     }
 
-    const { token, hashedToken, expires } = generateEmailVerificationToken();
+    const {
+      token,
+      hashedToken,
+      expires,
+    } = generateEmailVerificationToken();
 
     user.emailVerificationToken = hashedToken;
     user.emailVerificationExpires = expires;
+
     await user.save();
 
     const verificationUrl = getVerificationUrl(token);
-    const emailResult = await sendVerificationEmail({
-      to: user.email,
-      name: user.name,
-      verificationUrl,
-    });
+
+    const emailResult =
+      await sendVerificationEmail({
+        to: user.email,
+        name: user.name,
+        verificationUrl,
+      });
 
     return res.status(200).json({
       success: true,
       message: emailResult.sent
-        ? emailResult.previewUrl
-          ? "Verification email sent. Open the preview link below."
-          : "Verification email sent."
-        : "Email could not be sent — use the verification URL below.",
-      ...(emailResult.previewUrl ? { previewUrl: emailResult.previewUrl } : {}),
-      ...(emailResult.sent ? {} : { verificationUrl: emailResult.verificationUrl }),
+        ? "Verification email sent successfully."
+        : "Email could not be sent.",
+      data: {
+        ...(emailResult.previewUrl && {
+          previewUrl: emailResult.previewUrl,
+        }),
+        ...(!emailResult.sent && {
+          verificationUrl,
+        }),
+      },
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to resend verification email.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
 
 const getMe = async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    data: { user: formatUser(req.user) },
-  });
+  try {
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: formatUser(req.user),
+      },
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
 };
 
 const updateProfile = async (req, res) => {
   try {
     const { name, bio, address } = req.body;
-    const userId = req.user._id;
 
-    const updateData = {};
+    const user = await User.findById(req.user._id);
 
-    if (name) updateData.name = name;
-    if (bio !== undefined) updateData.bio = bio;
-    if (address !== undefined) updateData.address = address;
-
-    if (req.file) {
-      updateData.profilePicture = req.file.path;
+    if (!user) {
+      throw new AppError("User not found.", 404);
     }
 
-    const updatedUser = await User.findByIdAndUpdate(userId, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    if (name !== undefined) {
+      user.name = name;
+    }
+
+    if (bio !== undefined) {
+      user.bio = bio;
+    }
+
+    if (address !== undefined) {
+      user.address = address;
+    }
+
+    if (req.file) {
+      user.profilePicture = req.file.path;
+    }
+
+    await user.save();
 
     return res.status(200).json({
       success: true,
       message: "Profile updated successfully.",
-      data: { user: formatUser(updatedUser) },
+      data: {
+        user: formatUser(user),
+      },
     });
-  } catch (error) {
-    if (error.name === "ValidationError") {
-      const message = Object.values(error.errors)
-        .map((err) => err.message)
-        .join(", ");
-      return res.status(400).json({ success: false, message });
-    }
 
-    return res.status(500).json({
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Profile update failed.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -337,30 +389,32 @@ const forgotPassword = async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required.",
-      });
+      throw new AppError("Email is required.", 400);
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select(
-      "+passwordResetToken +passwordResetExpires"
-    );
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+    }).select("+passwordResetToken +passwordResetExpires");
 
+    // Security: Don't reveal whether the email exists
     if (!user) {
       return res.status(200).json({
         success: true,
-        message: "If an account exists with this email, a password reset link has been sent.",
+        message:
+          "If an account exists with this email, a password reset link has been sent.",
       });
     }
 
-    const { token, hashedToken, expires } = generatePasswordResetToken();
+    const { token, hashedToken, expires } =
+      generatePasswordResetToken();
 
     user.passwordResetToken = hashedToken;
     user.passwordResetExpires = expires;
+
     await user.save();
 
     const resetUrl = getResetPasswordUrl(token);
+
     const emailResult = await sendPasswordResetEmail({
       to: user.email,
       name: user.name,
@@ -370,18 +424,22 @@ const forgotPassword = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: emailResult.sent
-        ? emailResult.previewUrl
-          ? "Password reset email sent. Open the preview link below."
-          : "Password reset email sent."
-        : "Email could not be sent — use the reset URL below.",
-      ...(emailResult.previewUrl ? { previewUrl: emailResult.previewUrl } : {}),
-      ...(emailResult.sent ? {} : { resetUrl: emailResult.resetUrl }),
+        ? "Password reset email sent successfully."
+        : "Email could not be sent.",
+      data: {
+        ...(emailResult.previewUrl && {
+          previewUrl: emailResult.previewUrl,
+        }),
+        ...(!emailResult.sent && {
+          resetUrl,
+        }),
+      },
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to process password reset request.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -391,37 +449,44 @@ const resetPassword = async (req, res) => {
     const { token } = req.params;
     const { password } = req.body;
 
+    if (!token) {
+      throw new AppError("Reset token is required.", 400);
+    }
+
     if (!password) {
-      return res.status(400).json({
-        success: false,
-        message: "New password is required.",
-      });
+      throw new AppError("New password is required.", 400);
     }
 
     if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 8 characters.",
-      });
+      throw new AppError(
+        "Password must be at least 8 characters.",
+        400
+      );
     }
 
     const hashedToken = hashToken(token);
 
     const user = await User.findOne({
       passwordResetToken: hashedToken,
-      passwordResetExpires: { $gt: Date.now() },
-    }).select("+passwordResetToken +passwordResetExpires +password");
+      passwordResetExpires: {
+        $gt: Date.now(),
+      },
+    }).select(
+      "+password +passwordResetToken +passwordResetExpires"
+    );
 
     if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired reset token.",
-      });
+      throw new AppError(
+        "Invalid or expired reset token.",
+        400
+      );
     }
 
     user.password = password;
+
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
+
     await user.save();
 
     const accessToken = signAccessToken(user._id);
@@ -434,11 +499,11 @@ const resetPassword = async (req, res) => {
         token: accessToken,
       },
     });
+
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Password reset failed.",
-      error: error.message,
+      message: error.message,
     });
   }
 };
